@@ -1,211 +1,159 @@
-# Clyvo — Assistente Virtual de Saúde Pet
+# Clyvo — API e deploy Azure
 
-Projeto desenvolvido para o Challenge Clyvo Vet da disciplina **Disruptive Architectures: IoT, IoB & Generative AI**. A Clyvo é um chatbot especializado em saúde pet que orienta tutores na escolha de planos de saúde e localiza clínicas parceiras de acordo com a localização e a cobertura disponível.
+Backend FastAPI do chatbot Clyvo. A API usa Gemini, oferece duas tools
+(`recomendar_plano` e `buscar_clinicas_proximas`), gera fichas de contratação
+para encaminhamento ao suporte e salva essas fichas no MongoDB com status
+`aguardando_suporte`.
 
-> A implementação está no notebook [`ChallangeClyvo.ipynb`](./ChallangeClyvo.ipynb), desenvolvido e executado no Google Colab.
-
-## Problema de negócio
-
-Tutores precisam tomar decisões importantes sobre a saúde dos seus pets, como escolher uma cobertura compatível com idade, histórico clínico e orçamento, além de encontrar atendimento veterinário próximo em situações de necessidade.
-
-A proposta da Clyvo centraliza essa jornada em uma conversa simples e contextualizada. O assistente coleta os dados relevantes, recomenda uma opção de plano, informa clínicas parceiras e transforma a conversa confirmada em uma ficha estruturada de contratação.
-
-## Objetivos da solução
-
-- Facilitar a escolha de um plano de saúde pet personalizado.
-- Considerar idade, doença crônica, orçamento mensal e tolerância a risco.
-- Localizar clínicas parceiras próximas usando latitude e longitude.
-- Verificar se o plano analisado é aceito em cada clínica encontrada.
-- Manter o contexto da conversa durante o atendimento.
-- Validar os dados finais da contratação em um formato tipado e exportável.
-
-## Abordagem de Inteligência Artificial
-
-A solução combina **IA Generativa**, **function calling** e um **motor de regras**:
-
-- **IA Generativa:** o modelo Gemini interpreta as mensagens do tutor, conduz o diálogo e gera respostas em linguagem natural.
-- **System prompt e guardrails:** definem a persona da Clyvo, limitam o atendimento ao domínio de saúde pet e exigem confirmação antes da finalização.
-- **Function calling:** o Gemini pode acionar funções Python quando identifica uma intenção compatível.
-- **Motor de regras:** a recomendação de planos é calculada de forma determinística a partir dos dados coletados.
-- **Pydantic:** extrai e valida os dados da conversa em uma ficha de contratação estruturada.
-
-Essa combinação permite utilizar a flexibilidade da linguagem natural sem deixar decisões de negócio importantes exclusivamente a cargo do modelo.
-
-## Funcionalidades
-
-### Recomendação de plano
-
-A função `recomendar_plano` recebe:
-
-- idade do pet;
-- existência de doença crônica ou tratamento contínuo;
-- orçamento mensal máximo;
-- tolerância a risco: `baixo`, `medio`, `medio-alto` ou `alto`.
-
-Os planos atualmente cadastrados no notebook são:
-
-| Plano | Valor mensal | Perfil e coberturas principais |
-|---|---:|---|
-| Clyvo Essencial | R$ 49,90 | Vacinas anuais, consultas de rotina e exames laboratoriais básicos |
-| Clyvo Conforto | R$ 89,90 | Consultas ilimitadas, exames de imagem, vacinas e emergência 24h |
-| Clyvo Plus | R$ 149,90 | Cirurgias, internação, especialistas e exames complexos |
-| Clyvo Sênior & Especial | R$ 239,90 | Fisioterapia, acompanhamento especializado, UTI e medicamentos contínuos |
-
-Em caso de doença crônica, a regra prioriza o plano Sênior & Especial. Quando o orçamento não permite essa opção, é indicado o plano mais completo dentro do valor informado.
-
-### Busca de clínicas parceiras
-
-A função `buscar_clinicas_proximas` recebe a latitude, a longitude, o identificador do plano e, opcionalmente, um raio máximo de busca. A distância é calculada pela fórmula de **Haversine** e os resultados são ordenados do mais próximo para o mais distante.
-
-Para cada clínica, o chatbot informa:
-
-- distância aproximada;
-- disponibilidade de emergência 24 horas;
-- especialidades;
-- situação da cobertura: atendimento coberto ou atendimento com desconto/coparticipação.
-
-### Ficha final de contratação
-
-Depois da confirmação do tutor, o histórico completo é enviado à função `gerar_ficha_pydantic`. O resultado é validado pelo modelo `ContratacaoPlanoClyvo`, contendo:
-
-- nome do tutor;
-- nome do pet;
-- espécie;
-- idade;
-- existência de doença crônica;
-- plano escolhido;
-- valor mensal.
-
-## Arquitetura da solução
-
-```mermaid
-flowchart TD
-    A[Tutor] --> B[Chat interativo no Google Colab]
-    B --> C[Gemini]
-    C --> D[System prompt e guardrails]
-    C --> E{Identifica uma ação?}
-    E -->|Recomendar plano| F[recomendar_plano]
-    E -->|Buscar clínica| G[buscar_clinicas_proximas]
-    E -->|Conversa| H[Resposta em linguagem natural]
-    F --> I[Planos cadastrados em memória]
-    G --> J[Clínicas cadastradas em memória]
-    G --> K[Cálculo de distância Haversine]
-    I --> C
-    J --> C
-    K --> C
-    C --> H
-    H --> B
-    B --> L[Histórico da conversa]
-    L --> M[gerar_ficha_pydantic]
-    M --> N[Ficha JSON validada]
-```
-
-### Fluxo de dados
-
-1. O tutor envia uma mensagem para o chatbot.
-2. O Gemini interpreta a intenção usando o contexto e o `SYSTEM_PROMPT`.
-3. Quando necessário, o modelo gera uma chamada para uma ferramenta autorizada.
-4. A função Python consulta os dados locais de planos ou clínicas e retorna o resultado.
-5. O resultado da função é devolvido ao Gemini para gerar uma resposta compreensível.
-6. O histórico é mantido durante a sessão.
-7. Após a confirmação dos dados, o histórico é convertido em uma ficha validada pelo Pydantic.
-
-## Dados utilizados
-
-| Dado | Origem atual | Utilização |
-|---|---|---|
-| Idade do pet | Informada pelo tutor | Filtrar planos compatíveis |
-| Doença crônica | Informada pelo tutor | Priorizar cobertura especializada |
-| Orçamento mensal | Informado pelo tutor | Restringir o valor da recomendação |
-| Tolerância a risco | Informada pelo tutor | Comparar o perfil com o nível de cobertura |
-| Latitude e longitude | Informadas pelo tutor | Calcular proximidade das clínicas |
-| Planos e coberturas | Base estática no notebook | Executar a recomendação |
-| Clínicas e especialidades | Base estática no notebook | Buscar parceiros e cobertura |
-| Histórico da conversa | Memória da sessão | Gerar a ficha final |
-
-Na versão atual, os dados de planos e clínicas são demonstrativos e ficam em estruturas Python em memória. Não há integração implementada com banco de dados, serviço de mapas, prontuário eletrônico ou API externa de clínicas.
-
-## Tecnologias utilizadas
-
-- Python 3
-- Google Colab
-- Google GenAI SDK (`google-genai >= 2.3.0`)
-- Modelo Gemini (`gemini-3-flash-preview`, conforme configurado no notebook)
-- Pydantic
-- Function calling
-- Fórmula de Haversine
-- JSON
-
-## Como executar
-
-### Pré-requisitos
-
-- Conta Google para acessar o Google Colab.
-- Uma chave da API Gemini.
-- Acesso ao notebook deste repositório.
-
-### Execução no Google Colab
-
-1. Abra [`ChallangeClyvo.ipynb`](./ChallangeClyvo.ipynb) no Google Colab.
-2. Execute a primeira célula para instalar ou atualizar o SDK:
-
-   ```python
-   !pip install -q -U "google-genai>=2.3.0"
-   ```
-
-3. No Google Colab, abra **Secrets** e crie o segredo `GEMINI_API_KEY`.
-4. Execute as células em ordem, da configuração do cliente até a célula de chat.
-5. Interaja com a Clyvo pelo terminal exibido no notebook.
-6. Digite `sair`, `fim` ou `encerrar` para finalizar o atendimento.
-7. Execute a última célula para gerar a ficha de contratação em formato Python e JSON.
-
-A chave da API deve ser mantida em segredo e não deve ser inserida diretamente no notebook ou publicada no repositório.
-
-## Exemplo de interação
+## Estrutura
 
 ```text
-Você: Quero um plano para meu cachorro de 9 anos, com doença crônica.
-Clyvo: Para encontrar a melhor opção, qual é o seu orçamento mensal e sua tolerância a risco?
-Você: Posso pagar até R$ 250 por mês e aceito risco alto.
-Clyvo: Recomendo o plano Clyvo Sênior & Especial...
+api/python/
+  chatbot.py             # aplicação FastAPI e endpoint /chat
+  clyvo_tools.py         # ferramentas da IA
+  contratacao.py         # extração estruturada da ficha
+  mongo_repository.py    # persistência MongoDB
+  pyproject.toml
+  uv.lock
+azure/
+  Dockerfile             # imagem de produção
+  deploy_azure.sh        # ACR + Azure Container Instances
 ```
 
-O fluxo real pode fazer perguntas adicionais, solicitar localização para a busca de clínicas e pedir confirmação explícita antes de gerar a ficha final.
+## Pré-requisitos
 
-## Resultados parciais
+Para executar localmente:
 
-O protótipo demonstra:
+- Python 3.14+
+- `uv`
+- `GEMINI_API_KEY`
+- `MONGODB_URI`
 
-- atendimento conversacional com memória de contexto;
-- restrição do chatbot ao domínio da Clyvo por meio de guardrails;
-- acionamento de funções Python pelo Gemini;
-- recomendação baseada em critérios de negócio;
-- busca de clínicas por distância;
-- identificação de cobertura ou coparticipação;
-- extração de dados da conversa para JSON validado pelo Pydantic.
+Para publicar no Azure:
 
-## Limitações e próximos passos
+- Azure CLI (`az`)
+- Docker, ou `USE_ACR_BUILD=1`
+- `az login`
+- assinatura Azure com permissões para Resource Group, ACR e ACI
 
-- Substituir as listas estáticas por um banco de dados de planos, clínicas e contratos.
-- Integrar uma API de geolocalização e mapas.
-- Persistir o histórico e a ficha de contratação com autenticação e controle de acesso.
-- Adicionar validações mais completas para localização, idade e dados cadastrais.
-- Integrar dados clínicos reais, como vacinas, consultas e medicamentos, com consentimento do tutor.
-- Adicionar testes automatizados para as regras de recomendação e para as ferramentas.
-- Avaliar o modelo em produção, incluindo custo, latência, segurança e qualidade das respostas.
+O script de dependências do Microsoft Foundry também exige `azd`; ele é
+necessário apenas para fluxos Foundry/azd, não para o script ACR + ACI deste
+projeto.
 
-## Entrega
+## Configuração local
 
-- **Notebook:** [`ChallangeClyvo.ipynb`](./ChallangeClyvo.ipynb)
-- **Vídeo pitch:** inserir aqui o link não listado do YouTube.
-- **Repositório:** este repositório contém o código-fonte e a documentação da solução.
+Crie `api/python/.env`:
 
-## Integrantes da Equipe
+```env
+GEMINI_API_KEY=sua_chave
+GEMINI_MODEL=gemini-3.7-flash
+MONGODB_URI=mongodb+srv://usuario:senha@cluster.mongodb.net/
+MONGODB_DATABASE=clyvo
+```
 
-| Nome do Aluno | RM | 
-| :--- | :---: |
-| *André Emygdio Ferreira*      | *RM565592* |
-| *Gabriel Lourenço Martins*    | *RM562194* |
-| *Giovane Amato dos Santos*    | *RM561336* |
-| *Matheus Roque Arantes*       | *RM561959* |
-| *Orlando Gonçalves de Arruda* | *RM561584* |
+O `.env`, `.venv`, bytecode Python e caches não devem ser versionados.
+
+## Comandos locais
+
+```bash
+cd /home/roque/Documents/AI-DISRUPTIVE-ARCHITECTURES
+cd api/python
+uv sync --locked
+uv run uvicorn chatbot:app --reload --host 0.0.0.0 --port 8000
+```
+
+Em outro terminal:
+
+```bash
+curl http://localhost:8000/openapi.json
+curl -X POST http://localhost:8000/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"mensagem":"Quais planos vocês oferecem?"}'
+```
+
+## Validação
+
+```bash
+cd /home/roque/Documents/AI-DISRUPTIVE-ARCHITECTURES
+python3 -m compileall -q api/python
+cd api/python && uv lock --check
+bash -n ../../azure/deploy_azure.sh
+```
+
+Validação opcional da imagem:
+
+```bash
+cd /home/roque/Documents/AI-DISRUPTIVE-ARCHITECTURES
+docker build --platform linux/amd64 -f azure/Dockerfile -t disruptive-clyvo-api:local .
+```
+
+## Deploy Azure — ACR + ACI
+
+O script cria ou usa os recursos abaixo:
+
+- Resource Group: `rg-disruptive-api`
+- Azure Container Registry: `acrdisruptive565592`
+- Azure Container Instance: `aci-disruptive-api`
+- Região padrão: `mexicocentral`
+
+Antes do deploy:
+
+```bash
+cd /home/roque/Documents/AI-DISRUPTIVE-ARCHITECTURES
+az login
+az account set --subscription "<SUBSCRIPTION_ID_OU_NOME>"
+export GEMINI_API_KEY="sua_chave"
+export MONGODB_URI="mongodb+srv://usuario:senha@cluster.mongodb.net/"
+export MONGODB_DATABASE="clyvo"
+export GEMINI_MODEL="gemini-3.7-flash"
+```
+
+Com Docker local:
+
+```bash
+bash azure/deploy_azure.sh
+```
+
+Sem Docker local, usando ACR Tasks:
+
+```bash
+USE_ACR_BUILD=1 bash azure/deploy_azure.sh
+```
+
+O script imprime a URL pública ao final. Para consultar manualmente:
+
+```bash
+az container show -g rg-disruptive-api -n aci-disruptive-api \
+  --query ipAddress.fqdn -o tsv
+az container logs -g rg-disruptive-api -n aci-disruptive-api
+curl http://<FQDN>:8000/openapi.json
+```
+
+Para remover todo o resource group:
+
+```bash
+bash azure/deploy_azure.sh destroy
+```
+
+> O comando `destroy` remove permanentemente todos os recursos dentro de
+> `rg-disruptive-api`. Confirme o resource group antes de executá-lo.
+
+## Contrato do chatbot
+
+O endpoint aceita:
+
+```json
+{
+  "mensagem": "Quais clínicas existem perto de mim?",
+  "previous_interaction_id": null,
+  "latitude": -23.55,
+  "longitude": -46.63,
+  "pets": [],
+  "planos": [],
+  "contratacoes": []
+}
+```
+
+O chatbot não finaliza contratos. Depois da confirmação do tutor, ele gera a
+ficha, salva no MongoDB e retorna o `contratacao_id` para o suporte concluir a
+operação.
