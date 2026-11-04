@@ -1,8 +1,11 @@
 import os
+import logging
 from datetime import datetime, timezone
 
 from bson import ObjectId
 from pymongo import MongoClient
+
+logger = logging.getLogger(__name__)
 
 
 def salvar_contratacao(ficha: dict) -> str:
@@ -16,14 +19,21 @@ def salvar_contratacao(ficha: dict) -> str:
     client = MongoClient(uri, serverSelectionTimeoutMS=5000)
     try:
         client.admin.command("ping")
-        resultado = client[database_name]["contratacoes"].insert_one(
+        colecao = client[database_name]["contratacoes"]
+        resultado = colecao.insert_one(
             {
                 **ficha,
                 "status": "aguardando_suporte",
                 "criada_em": datetime.now(timezone.utc),
             }
         )
-        return str(resultado.inserted_id)
+        contratacao_id = str(resultado.inserted_id)
+        logger.info(
+            "Ficha salva no MongoDB: database=%s collection=contratacoes id=%s",
+            database_name,
+            contratacao_id,
+        )
+        return contratacao_id
     finally:
         client.close()
 

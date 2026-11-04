@@ -35,7 +35,7 @@ client = genai.Client(
     ),
 )
 
-MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
+MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 SYSTEM_PROMPT = """
 # CONTEXTO E PERSONA
 Você é o assistente virtual oficial da **Clyvo**, uma plataforma de e-commerce e planos de saúde pet.
@@ -118,7 +118,12 @@ def mensagem_confirma_ficha(mensagem: str) -> bool:
         return False
     return bool(
         re.search(
-            r"\b(sim|confirmo|confirmar|pode confirmar|pode fechar|pode contratar)\b",
+            r"\b("
+            r"sim|confirmo|confirmar|pode confirmar|pode fechar|pode contratar|"
+            r"pode gerar|gere|gerar a ficha|gerar o cadastro|"
+            r"dados estao corretos|dados estão corretos|"
+            r"tudo esta correto|tudo está correto|pode prosseguir"
+            r")\b",
             texto,
         )
     )
@@ -236,8 +241,17 @@ def processar_mensagem(
         raise RuntimeError("A IA excedeu o limite de chamadas encadeadas de tools.")
 
     if mensagem_confirma_ficha(mensagem):
+        logger.info(
+            "Confirmação de ficha detectada: interaction_id=%s",
+            interaction.id,
+        )
         historico = obter_historico(interaction.id)
         contratacao = gerar_ficha_pydantic(historico)
+        logger.info(
+            "Ficha estruturada: pet=%s plano=%s",
+            contratacao.nome_pet,
+            contratacao.plano_escolhido,
+        )
         contratacao_id = salvar_contratacao(contratacao.model_dump())
         resposta = (
             "A ficha foi gerada e registrada para análise. "

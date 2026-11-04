@@ -5,7 +5,7 @@ from typing import Literal
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -18,6 +18,18 @@ class ContratacaoPlanoClyvo(BaseModel):
     tem_doenca_cronica: bool
     plano_escolhido: str
     valor_mensal: float
+
+    @field_validator("especie", mode="before")
+    @classmethod
+    def normalizar_especie(cls, valor: object) -> object:
+        if not isinstance(valor, str):
+            return valor
+        especie = valor.casefold().strip()
+        if especie in {"cachorro", "cão", "cao", "dog", "canino"}:
+            return "cao"
+        if especie in {"gato", "gata", "cat", "felino", "felina"}:
+            return "gato"
+        return especie
 
 
 def gerar_ficha_pydantic(historico_conversa: str) -> ContratacaoPlanoClyvo:
